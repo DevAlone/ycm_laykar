@@ -11,7 +11,7 @@ def log(*args, **kwargs):
     sys.stdout.flush()
 
 
-ITEMS_PER_CYCLE = 10
+ITEMS_PER_CYCLE = 50
 class ItemDeletedException(BaseException):
     pass
 
