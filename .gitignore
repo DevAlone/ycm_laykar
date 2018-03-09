@@ -1,0 +1,3 @@
+.secret_*
+*.log
+env
