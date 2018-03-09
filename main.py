@@ -11,7 +11,7 @@ def log(*args, **kwargs):
     sys.stdout.flush()
 
 
-ITEMS_PER_CYCLE = 50
+ITEMS_PER_CYCLE = 10
 class ItemDeletedException(BaseException):
     pass
 
@@ -56,7 +56,7 @@ async def main():
                     
                     maximum_id = max(json_result['items'], key=lambda x: x['id'])['id']
                 
-                for i in range(maximum_id, maximum_id + ITEMS_PER_CYCLE):
+                for i in range(maximum_id + 1, maximum_id + ITEMS_PER_CYCLE):
                     try:
                         await like_item(i, session)
                         log('item {} liked'.format(i))
@@ -69,7 +69,7 @@ async def main():
             traceback.print_exc()
             await asyncio.sleep(30)
         finally:
-            await asyncio.sleep(random.randint(1, 3))
+            await asyncio.sleep(random.randint(10, 60))
 
 
 if __name__ == '__main__':
