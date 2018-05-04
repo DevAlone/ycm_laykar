@@ -53,23 +53,23 @@ async def main():
             async with aiohttp.ClientSession(cookies=cookies) as session:
                 async with session.get('http://youcomedy.me/user/newlaikar/liked/list?page=1') as resp:
                     json_result = json.loads(await resp.text())
-                    
+
                     maximum_id = max(json_result['items'], key=lambda x: x['id'])['id']
-                
-                for i in range(maximum_id + 1, maximum_id + ITEMS_PER_CYCLE):
+
+                for i in range(maximum_id + 1, maximum_id + 1 + ITEMS_PER_CYCLE):
                     try:
                         await like_item(i, session)
                         log('item {} liked'.format(i))
+                        await asyncio.sleep(1)
                     except ItemDeletedException:
                         log('item {} deleted'.format(i))
-                
         except BaseException as ex:
             log(type(ex))
             log(ex)
             traceback.print_exc()
             await asyncio.sleep(30)
         finally:
-            await asyncio.sleep(random.randint(10, 60))
+            await asyncio.sleep(random.randint(5, 60))
 
 
 if __name__ == '__main__':
