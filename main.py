@@ -11,7 +11,7 @@ def log(*args, **kwargs):
     sys.stdout.flush()
 
 
-ITEMS_PER_CYCLE = 10
+ITEMS_PER_CYCLE = 32
 class ItemDeletedException(BaseException):
     pass
 
@@ -30,17 +30,17 @@ def get_cookies():
 async def like_item(item_id, session, recursion_limiter=10):
     if recursion_limiter <= 0:
         raise Exception('recursion depth exceded')
-    
+
     base_url = 'http://youcomedy.me/items/{}/like'
     headers = {
         'X-Requested-With': 'XMLHttpRequest'
     }
-    
+
     async with session.get(base_url.format(item_id), headers=headers) as resp:
         json_result = json.loads(await resp.text())
         if 'error_text' in json_result and json_result['error_text'] == 'Шутка удалена':
             raise ItemDeletedException()
-            
+
         # log(json_result)
         if json_result['userVote'] <= 0:
             await like_item(item_id, session, recursion_limiter - 1)
