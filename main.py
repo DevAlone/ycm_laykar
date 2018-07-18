@@ -78,6 +78,11 @@ async def get_last_item_id(session):
             return maximum_id
 
 
+async def set_last_item_id(item_id, session):
+    with open('.secret_last_item_id') as f:
+        f.write(str(item_id))
+
+
 async def process_item(item_id, session):
     log('start processing item {}'.format(item_id))
     try:
@@ -95,6 +100,7 @@ async def moving_forward_processor(session):
 
             for i in range(maximum_id + 1, maximum_id + 1 + ITEMS_PER_CYCLE):
                 await process_item(i, session)
+                set_last_item_id(i)
         except:
             traceback.print_exc()
             await asyncio.sleep(60)
