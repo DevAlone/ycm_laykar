@@ -12,6 +12,9 @@ def log(*args, **kwargs):
 
 
 ITEMS_PER_CYCLE = 32
+LIKED_FEED_URL = 'http://youcomedy.me/user/newlaikar/liked/list?page=1'
+
+
 class ItemDeletedException(BaseException):
     pass
 
@@ -38,38 +41,92 @@ async def like_item(item_id, session, recursion_limiter=10):
 
     async with session.get(base_url.format(item_id), headers=headers) as resp:
         json_result = json.loads(await resp.text())
-        if 'error_text' in json_result and json_result['error_text'] == 'Шутка удалена':
-            raise ItemDeletedException()
 
-        # log(json_result)
+        if 'error_text' in json_result:
+            if json_result['error_text'] == 'Шутка удалена':
+                raise ItemDeletedException()
+            else:
+                raise Exception('some error: {}'.format(json_result))
+        elif 'rating' not in json_result:
+            raise Exception(
+                "shit happened, "
+                "it's most like because of bad authorization: {}".format(
+                    json_result
+                )
+            )
+
         if json_result['userVote'] <= 0:
             await like_item(item_id, session, recursion_limiter - 1)
 
 
-async def main():
+async def get_last_item_id(session):
+    try:
+        with open('.secret_last_item_id') as f:
+            return int(f.read().strip())
+    except FileNotFoundError:
+        async with session.get(LIKED_FEED_URL) as resp:
+            json_result = json.loads(await resp.text())
+            if not json_result['items']:
+                return 1
+
+            maximum_id = max(
+                json_result['items'], key=lambda x: x['id']
+            )['id']
+            with open('.secret_last_item_id', 'w') as f:
+                f.write(str(maximum_id))
+
+            return maximum_id
+
+
+async def process_item(item_id, session):
+    log('start processing item {}'.format(item_id))
+    try:
+        await like_item(item_id, session)
+        log('item {} liked'.format(item_id))
+        await asyncio.sleep(1)
+    except ItemDeletedException:
+        log('item {} deleted'.format(item_id))
+
+
+async def moving_forward_processor(session):
     while True:
         try:
-            cookies = get_cookies()
-            async with aiohttp.ClientSession(cookies=cookies) as session:
-                async with session.get('http://youcomedy.me/user/newlaikar/liked/list?page=1') as resp:
-                    json_result = json.loads(await resp.text())
+            maximum_id = await get_last_item_id(session)
 
-                    maximum_id = max(json_result['items'], key=lambda x: x['id'])['id']
+            for i in range(maximum_id + 1, maximum_id + 1 + ITEMS_PER_CYCLE):
+                await process_item(i, session)
+        except:
+            traceback.print_exc()
+            await asyncio.sleep(60)
+        finally:
+            await asyncio.sleep(random.randint(5, 60))
 
-                for i in range(maximum_id + 1, maximum_id + 1 + ITEMS_PER_CYCLE):
-                    try:
-                        await like_item(i, session)
-                        log('item {} liked'.format(i))
-                        await asyncio.sleep(1)
-                    except ItemDeletedException:
-                        log('item {} deleted'.format(i))
-        except BaseException as ex:
-            log(type(ex))
-            log(ex)
+
+async def recommendations_processor(session):
+    while True:
+        base_url = 'http://youcomedy.me/recommend/load'\
+            '?page=0&rand=0.{}'.format(random.randint(1000000, 9999999))
+        try:
+            async with session.get(base_url) as resp:
+                json_result = json.loads(await resp.text())
+                for item in json_result['items']:
+                    await process_item(int(item['id']), session)
+                else:
+                    await asyncio.sleep(120)
+        except:
             traceback.print_exc()
             await asyncio.sleep(30)
         finally:
-            await asyncio.sleep(random.randint(5, 60))
+            await asyncio.sleep(random.randint(10, 30))
+
+
+async def main():
+    cookies = get_cookies()
+    async with aiohttp.ClientSession(cookies=cookies) as session:
+        await asyncio.gather(*[
+            moving_forward_processor(session),
+            recommendations_processor(session),
+        ])
 
 
 if __name__ == '__main__':
