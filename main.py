@@ -19,6 +19,10 @@ class ItemDeletedException(BaseException):
     pass
 
 
+class CommentDeletedException(BaseException):
+    pass
+
+
 def get_session_key():
     with open('.secret_session') as file:
         return file.read().strip()
@@ -30,11 +34,15 @@ def get_cookies():
     }
 
 
-async def like_item(item_id, session, recursion_limiter=10):
+async def like(item_id, session, recursion_limiter, is_comment):
     if recursion_limiter <= 0:
-        raise Exception('recursion depth exceded')
+        raise Exception('recursion depth exceeded')
 
-    base_url = 'http://youcomedy.me/items/{}/like'
+    if is_comment:
+        base_url = 'http://youcomedy.me/comments/{}/like'
+    else:
+        base_url = 'http://youcomedy.me/items/{}/like'
+
     headers = {
         'X-Requested-With': 'XMLHttpRequest'
     }
@@ -43,7 +51,9 @@ async def like_item(item_id, session, recursion_limiter=10):
         json_result = json.loads(await resp.text())
 
         if 'error_text' in json_result:
-            if json_result['error_text'] == 'Шутка удалена':
+            if is_comment and json_result['error_text'] == 'Нет такого комментария':
+                raise CommentDeletedException()
+            elif not is_comment and json_result['error_text'] == 'Шутка удалена':
                 raise ItemDeletedException()
             else:
                 raise Exception('some error: {}'.format(json_result))
@@ -56,7 +66,20 @@ async def like_item(item_id, session, recursion_limiter=10):
             )
 
         if json_result['userVote'] <= 0:
-            await like_item(item_id, session, recursion_limiter - 1)
+            await like(item_id, session, recursion_limiter - 1, is_comment)
+
+
+async def like_item(item_id, session, recursion_limiter=10):
+    await like(item_id, session, recursion_limiter, is_comment=False)
+
+
+async def like_comment(comment_id, session, recursion_limiter=10):
+    await like(comment_id, session, recursion_limiter, is_comment=True)
+
+
+async def set_last_item_id(item_id):
+    with open('.secret_last_item_id', 'w') as f:
+        f.write(str(item_id))
 
 
 async def get_last_item_id(session):
@@ -72,15 +95,24 @@ async def get_last_item_id(session):
             maximum_id = max(
                 json_result['items'], key=lambda x: x['id']
             )['id']
-            with open('.secret_last_item_id', 'w') as f:
-                f.write(str(maximum_id))
+            await set_last_item_id(maximum_id)
 
             return maximum_id
 
 
-async def set_last_item_id(item_id, session):
-    with open('.secret_last_item_id') as f:
+async def set_last_comment_id(item_id):
+    with open('.secret_last_comment_id', 'w') as f:
         f.write(str(item_id))
+
+
+async def get_last_comment_id():
+    try:
+        with open('.secret_last_comment_id') as f:
+            return int(f.read().strip())
+    except FileNotFoundError:
+        set_last_comment_id(1)
+
+        return 1
 
 
 async def process_item(item_id, session):
@@ -88,24 +120,59 @@ async def process_item(item_id, session):
     try:
         await like_item(item_id, session)
         log('item {} liked'.format(item_id))
-        await asyncio.sleep(1)
     except ItemDeletedException:
         log('item {} deleted'.format(item_id))
+        await asyncio.sleep(60)
+        raise
+    finally:
+        await asyncio.sleep(1)
 
 
-async def moving_forward_processor(session):
+async def process_comment(comment_id, session):
+    log('start processing comment {}'.format(comment_id))
+    try:
+        await like_comment(comment_id, session)
+        log('comment {} liked'.format(comment_id))
+    except (CommentDeletedException, ItemDeletedException):
+        log('comment {} deleted'.format(comment_id))
+        await asyncio.sleep(10)
+        raise
+    finally:
+        await asyncio.sleep(1)
+
+
+async def moving_forward_items_processor(session):
     while True:
         try:
             maximum_id = await get_last_item_id(session)
 
             for i in range(maximum_id + 1, maximum_id + 1 + ITEMS_PER_CYCLE):
                 await process_item(i, session)
-                set_last_item_id(i)
+                await set_last_item_id(i)
+        except (ItemDeletedException, CommentDeletedException):
+            pass
         except:
             traceback.print_exc()
             await asyncio.sleep(60)
         finally:
             await asyncio.sleep(random.randint(5, 60))
+
+
+async def moving_forward_comments_processor(session):
+    while True:
+        try:
+            maximum_id = await get_last_comment_id()
+
+            for i in range(maximum_id + 1, maximum_id + 1 + ITEMS_PER_CYCLE):
+                await process_comment(i, session)
+                await set_last_comment_id(i)
+        except (ItemDeletedException, CommentDeletedException):
+            pass
+        except:
+            traceback.print_exc()
+            await asyncio.sleep(60)
+        finally:
+            await asyncio.sleep(random.randint(5, 15))
 
 
 async def recommendations_processor(session):
@@ -130,8 +197,9 @@ async def main():
     cookies = get_cookies()
     async with aiohttp.ClientSession(cookies=cookies) as session:
         await asyncio.gather(*[
-            moving_forward_processor(session),
+            moving_forward_items_processor(session),
             recommendations_processor(session),
+            moving_forward_comments_processor(session),
         ])
 
 
